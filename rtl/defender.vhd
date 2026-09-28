@@ -168,6 +168,7 @@ architecture struct of defender is
 	signal clock_6n   : std_logic;
 	signal cpu_a      : std_logic_vector(15 downto 0);
 	signal cpu_addr   : std_logic_vector(15 downto 0);
+	signal ra_vid17   : std_logic_vector(16 downto 0);
 	signal cpu_di     : std_logic_vector( 7 downto 0);
 	signal cpu_do     : std_logic_vector( 7 downto 0);
 	signal cpu_rw     : std_logic;
@@ -467,19 +468,25 @@ begin
 	end if;
 end process;
 
--- RetroAchievements tap: CPU writes -> FinalBurn Neo "All Ram" offset.
--- 4200 DrvVidRAM (0000-BFFF by CPU address, before the video PROM),
--- E200 DrvPalRAM (C000-C00F in I/O page 0). CMOS (C400-C7FF) is a separate
--- FBNeo area ("NVRAM") and is not mirrored.
+-- RetroAchievements tap: CPU writes -> FinalBurn Neo "All Ram" offset
+-- (17 bits): 04200 DrvVidRAM (0000-BFFF by CPU address, before the video
+-- PROM), 10200 DrvPalRAM (C000-C00F in I/O page 0). CMOS (C400-C7FF) is a
+-- separate FBNeo area ("NVRAM") and is not mirrored. The block is 0x10218
+-- bytes; the 64 kB shadow folds 10000-10217 into 1000-1217 (DrvM6809RAM0,
+-- unused by Defender), so ra_off is the shadow offset.
+ra_vid17 <= std_logic_vector(unsigned('0' & cpu_addr) + 16#04200#);
+
 process (clock_6)
 begin
 	if rising_edge(clock_6) then
 		ra_wr   <= wram_we or palette_we;
 		ra_data <= cpu_do;
 		if palette_we = '1' then
-			ra_off <= X"E20" & cpu_addr(3 downto 0);
+			ra_off <= X"120" & cpu_addr(3 downto 0);
+		elsif ra_vid17(16) = '1' then
+			ra_off <= X"1" & ra_vid17(11 downto 0);
 		else
-			ra_off <= std_logic_vector(unsigned(cpu_addr) + 16#4200#);
+			ra_off <= ra_vid17(15 downto 0);
 		end if;
 	end if;
 end process;

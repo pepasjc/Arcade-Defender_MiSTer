@@ -401,15 +401,18 @@ nvram #(
 // from jotego's jtframe via the RA jtcores fork). RA arcade sets are written
 // against FinalBurn Neo, whose Williams driver (d_williams.cpp, also Defender)
 // exposes the MemIndex concatenation AllRam..RamEnd as "All Ram":
-//     0x0000 DrvM6809RAM0 0x4000  unused by Defender (stays zero)
-//     0x4000 DrvM6800RAM0 0x0100  sound CPU RAM (not tapped, stays zero)
-//     0x4100 DrvM6800RAM1 0x0100  unused
-//     0x4200 DrvVidRAM    0xC000  CPU 0000-BFFF (video + work RAM), by the CPU
-//                                 address (before the board's video PROM)
-//     0xE200 DrvPalRAM    0x0010  palette C000-C00F (I/O page 0)
-//     0xE210 DrvBlitRAM   0x0008  no blitter on Defender (stays zero)
-// The 6809 is 8-bit: shadow byte k is RA address k. The ARM region table is
-// the identity {0, 0xE218, 0}. CMOS is a separate FBNeo area, not mirrored.
+//     0x00000 DrvM6809RAM0 0x4000  unused by Defender (stays zero)
+//     0x04000 DrvM6800RAM0 0x0100  sound CPU RAM (not tapped, stays zero)
+//     0x04100 DrvM6800RAM1 0x0100  unused
+//     0x04200 DrvVidRAM    0xC000  CPU 0000-BFFF (video + work RAM), by the CPU
+//                                  address (before the board's video PROM)
+//     0x10200 DrvPalRAM    0x0010  palette C000-C00F (I/O page 0)
+//     0x10210 DrvBlitRAM   0x0008  no blitter on Defender (stays zero)
+// The 6809 is 8-bit: shadow byte k is RA address k, except that the block is
+// 0x10218 bytes long and the 64 kB shadow folds 0x10000-0x10217 into
+// 0x1000-0x1217 (DrvM6809RAM0, never written on Defender). ARM region table:
+// {0x0000, 0x1000, 0x0000}, {0x4000, 0xC000, 0x4000}, {0x10000, 0x218, 0x1000}.
+// CMOS is a separate FBNeo area, not mirrored.
 //
 // The only other DDR client is the screen rotation framebuffer, which runs on
 // CLK_VIDEO (clk_48), ignores DDRAM_BUSY and writes one pixel per CE_PIXEL while
