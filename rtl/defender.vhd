@@ -153,7 +153,13 @@ port(
 	input0         : in  std_logic_vector( 7 downto 0);
 	input1         : in  std_logic_vector( 7 downto 0);
 	input2         : in  std_logic_vector( 7 downto 0);
-	flip           : in  std_logic
+	flip           : in  std_logic;
+
+	-- RetroAchievements tap: one-clock (clock_6) write strobe into FinalBurn
+	-- Neo's "All Ram" block (d_williams.cpp MemIndex), its byte offset and data
+	ra_wr          : out std_logic;
+	ra_off         : out std_logic_vector(15 downto 0);
+	ra_data        : out std_logic_vector( 7 downto 0)
 );
 end defender;
 
@@ -457,6 +463,23 @@ begin
 			else
 				defender_state <= '0';
 			end if;
+		end if;
+	end if;
+end process;
+
+-- RetroAchievements tap: CPU writes -> FinalBurn Neo "All Ram" offset.
+-- 4200 DrvVidRAM (0000-BFFF by CPU address, before the video PROM),
+-- E200 DrvPalRAM (C000-C00F in I/O page 0). CMOS (C400-C7FF) is a separate
+-- FBNeo area ("NVRAM") and is not mirrored.
+process (clock_6)
+begin
+	if rising_edge(clock_6) then
+		ra_wr   <= wram_we or palette_we;
+		ra_data <= cpu_do;
+		if palette_we = '1' then
+			ra_off <= X"E20" & cpu_addr(3 downto 0);
+		else
+			ra_off <= std_logic_vector(unsigned(cpu_addr) + 16#4200#);
 		end if;
 	end if;
 end process;

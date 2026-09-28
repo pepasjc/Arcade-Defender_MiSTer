@@ -51,7 +51,7 @@ assign VIDEO_ARY = (!ar) ? ((status[2] | landscape) ? 8'd3 : 8'd4) : 12'd0;
 
 `include "build_id.v" 
 localparam CONF_STR = {
-	"A.DFNDR;;",
+	"RA_DFNDR;;",
 	"-;",
 	"H0OGH,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"H1H0O2,Orientation,Vert,Horz;",
@@ -281,6 +281,11 @@ wire HBlank_i = HBlank;
 wire VBlank_i = VBlank;
 wire def_state;
 
+// RetroAchievements tap (see RETROACHIEVEMENTS below)
+wire        ra_wr;
+wire [15:0] ra_off;
+wire  [7:0] ra_data;
+
 defender defender
 (
 	.clock_6(clk_6),
@@ -311,7 +316,11 @@ defender defender
 	.input0(in0),
 	.input1(in1),
 	.input2(in2),
-	.flip(core_flip)
+	.flip(core_flip),
+
+	.ra_wr(ra_wr),
+	.ra_off(ra_off),
+	.ra_data(ra_data)
 );
 
 ///////////////////////////////////////////////////////////////////
@@ -329,7 +338,24 @@ wire is_vertical_game = (mod == mod_jin) || (mod == mod_mayday);
 wire core_flip = is_vertical_game & status[18];
 wire video_rotated;
 
-screen_rotate screen_rotate (.*);
+// The rotation framebuffer shares the DDR port with the RetroAchievements
+// mirror (see below), so its DDRAM outputs go through the RA mux.
+wire  [7:0] rot_burstcnt, rot_be;
+wire [28:0] rot_addr;
+wire [63:0] rot_din;
+wire        rot_we, rot_rd;
+
+screen_rotate screen_rotate
+(
+	.*,
+	.DDRAM_CLK(),
+	.DDRAM_BURSTCNT(rot_burstcnt),
+	.DDRAM_ADDR(rot_addr),
+	.DDRAM_DIN(rot_din),
+	.DDRAM_BE(rot_be),
+	.DDRAM_WE(rot_we),
+	.DDRAM_RD(rot_rd)
+);
 
 arcade_video #(306,8) arcade_video
 (
@@ -368,4 +394,75 @@ nvram #(
 	.nvram_data_out(hs_data_out),
 	.pause_cpu(hs_pause)
 );
+
+///////////////////   RETROACHIEVEMENTS   //////////////////
+//
+// RAM mirror for the RetroAchievements fork of Main_MiSTer (defender_ra_mirror.v,
+// from jotego's jtframe via the RA jtcores fork). RA arcade sets are written
+// against FinalBurn Neo, whose Williams driver (d_williams.cpp, also Defender)
+// exposes the MemIndex concatenation AllRam..RamEnd as "All Ram":
+//     0x0000 DrvM6809RAM0 0x4000  unused by Defender (stays zero)
+//     0x4000 DrvM6800RAM0 0x0100  sound CPU RAM (not tapped, stays zero)
+//     0x4100 DrvM6800RAM1 0x0100  unused
+//     0x4200 DrvVidRAM    0xC000  CPU 0000-BFFF (video + work RAM), by the CPU
+//                                 address (before the board's video PROM)
+//     0xE200 DrvPalRAM    0x0010  palette C000-C00F (I/O page 0)
+//     0xE210 DrvBlitRAM   0x0008  no blitter on Defender (stays zero)
+// The 6809 is 8-bit: shadow byte k is RA address k. The ARM region table is
+// the identity {0, 0xE218, 0}. CMOS is a separate FBNeo area, not mirrored.
+//
+// The only other DDR client is the screen rotation framebuffer, which runs on
+// CLK_VIDEO (clk_48), ignores DDRAM_BUSY and writes one pixel per CE_PIXEL while
+// VGA_DE is high. So the mirror is clocked by clk_48 too (its shadow is written
+// from clk_6 through dual-clock BRAM), and it only starts a copy once VGA_DE has
+// been low for 4096 clocks (85 us, longer than any HBlank): the copy (8k qwords,
+// ~0.2 ms) then runs in VBlank and the framebuffer never loses a write. Held
+// off during ROM download.
+
+reg [1:0] ra_rst_s, ra_vbl_s, ra_dl_s;
+always @(posedge clk_48) begin
+	ra_rst_s <= { ra_rst_s[0], reset };
+	ra_vbl_s <= { ra_vbl_s[0], VBlank };
+	ra_dl_s  <= { ra_dl_s[0],  ioctl_download };
+end
+
+reg [11:0] ra_de_idle;
+always @(posedge clk_48) begin
+	if (VGA_DE) ra_de_idle <= 0;
+	else if (~&ra_de_idle) ra_de_idle <= ra_de_idle + 1'd1;
+end
+
+wire  [7:0] ra_burstcnt, ra_be;
+wire [28:0] ra_addr;
+wire [63:0] ra_din;
+wire        ra_we, ra_active;
+
+defender_ra_mirror #(.AW(16)) ra_mirror
+(
+	.rst(ra_rst_s[1]),
+	.clk(clk_48),
+	.lvbl(~ra_vbl_s[1]),
+	.hold(ra_dl_s[1]),
+	.start_ok(&ra_de_idle),
+	.wr_clk(clk_6),
+	.wr_word(ra_off[15:1]),
+	.wr_din({2{ra_data}}),
+	.wr_be(~ra_wr ? 2'b00 : ra_off[0] ? 2'b10 : 2'b01),
+	.active(ra_active),
+	.ddr_busy(DDRAM_BUSY),
+	.ddr_burstcnt(ra_burstcnt),
+	.ddr_addr(ra_addr),
+	.ddr_we(ra_we),
+	.ddr_be(ra_be),
+	.ddr_din(ra_din)
+);
+
+assign DDRAM_CLK      = clk_48;
+assign DDRAM_BURSTCNT = ra_active ? ra_burstcnt : rot_burstcnt;
+assign DDRAM_ADDR     = ra_active ? ra_addr     : rot_addr;
+assign DDRAM_DIN      = ra_active ? ra_din      : rot_din;
+assign DDRAM_BE       = ra_active ? ra_be       : rot_be;
+assign DDRAM_WE       = ra_active ? ra_we       : rot_we;
+assign DDRAM_RD       = ra_active ? 1'b0        : rot_rd;
+
 endmodule

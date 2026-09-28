@@ -6,6 +6,7 @@ set_global_assignment -name VHDL_FILE rtl/pia6821.vhd
 set_global_assignment -name VHDL_FILE rtl/cpu09l_128a.vhd
 set_global_assignment -name VHDL_FILE rtl/williams_sound_board.vhd
 set_global_assignment -name VHDL_FILE rtl/defender.vhd
+set_global_assignment -name VERILOG_FILE rtl/defender_ra_mirror.v
 set_global_assignment -name VERILOG_FILE rtl/pause.v
 set_global_assignment -name VERILOG_FILE rtl/nvram.v
 set_global_assignment -name SYSTEMVERILOG_FILE "Arcade-Defender.sv"
